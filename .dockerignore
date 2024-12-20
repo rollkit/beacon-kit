@@ -5,5 +5,8 @@ networks/
 proto/
 tools/
 .github/
+.git/
 .vscode/
 *.md
+go.sum
+go.mod

@@ -1,35 +1,64 @@
-# Dockerfile for `start` command
-FROM alpine:latest
-FROM golang:1.23-alpine
+# Build stage
+FROM golang:1.23-alpine AS builder
 
-# Install required packages
-# Install Go and other dependencies
-RUN apk add --no-cache bash make curl jq go ncurses docker
-RUN apk add --no-cache git
-RUN apk add --no-cache build-base
-RUN apk add --no-cache gcc musl-dev
+# Install build dependencies
+RUN apk add --no-cache \
+    bash \
+    make \
+    git \
+    build-base \
+    gcc \
+    musl-dev \
+    ncurses
 
-# Set environment variables and directories
-ENV TESTAPP_FILES_DIR=/beacon-kit/testing/files
-ENV JWT_PATH=$TESTAPP_FILES_DIR/jwt.hex
-ENV ETH_GENESIS_PATH=$TESTAPP_FILES_DIR/eth-genesis.json
-ENV NETHER_ETH_GENESIS_PATH=$TESTAPP_FILES_DIR/eth-nether-genesis.json
-ENV ETH_DATA_DIR=/beacon-kit/.tmp/eth-home
-ENV IPC_PATH=$ETH_DATA_DIR/eth-engine.ipc
-ENV HTTP_URL=0.0.0.0:8551
-ENV IPC_PREFIX=ipc://
-ENV HTTP_PREFIX=http://
-ENV JWT_SECRET_PATH=$JWT_PATH
-
-RUN mkdir -p /beacon-kit
-COPY . /beacon-kit
-COPY ./kurtosis /beacon-kit/kurtosis
-
-RUN chmod +x $TESTAPP_FILES_DIR/entrypoint-docker.sh
-
+# Set up build directory
 WORKDIR /beacon-kit
+
+# Copy only necessary files for building
+COPY . .
+
+# Build the application
 RUN make build
 
-# Run the start command
+# Final stage
+FROM alpine:latest
+
+# Install minimal runtime dependencies
+RUN apk add --no-cache \
+    make \
+    bash \
+    curl \
+    jq \
+    ncurses
+
+# Set environment variables
+ENV TESTAPP_FILES_DIR=/beacon-kit/testing/files \
+    JWT_PATH=/beacon-kit/testing/files/jwt.hex \
+    ETH_GENESIS_PATH=/beacon-kit/testing/files/eth-genesis.json \
+    NETHER_ETH_GENESIS_PATH=/beacon-kit/testing/files/eth-nether-genesis.json \
+    ETH_DATA_DIR=/beacon-kit/.tmp/eth-home \
+    IPC_PATH=/beacon-kit/.tmp/eth-home/eth-engine.ipc \
+    HTTP_URL=0.0.0.0:8551 \
+    IPC_PREFIX=ipc:// \
+    HTTP_PREFIX=http:// \
+    JWT_SECRET_PATH=/beacon-kit/testing/files/jwt.hex
+
+# Create necessary directories
+RUN mkdir -p /beacon-kit/testing/files /beacon-kit/.tmp/eth-home
+
+# Copy only necessary files from builder
+COPY --from=builder /beacon-kit/testing/files/entrypoint-docker.sh /beacon-kit/testing/files/
+COPY --from=builder /beacon-kit/testing/files/jwt.hex /beacon-kit/testing/files/
+COPY --from=builder /beacon-kit/testing/files/eth-genesis.json /beacon-kit/testing/files/
+COPY --from=builder /beacon-kit/testing/files/eth-nether-genesis.json /beacon-kit/testing/files/
+COPY --from=builder /beacon-kit/build/bin/beacond /bin/beacond
+COPY --from=builder /beacon-kit/build/bin/beacond /beacon-kit/build/bin/beacond
+
+# Set working directory
+WORKDIR /beacon-kit
+
+# Make entrypoint script executable
+RUN chmod +x $TESTAPP_FILES_DIR/entrypoint-docker.sh
+
+# Set the entrypoint
 CMD JWT_SECRET_PATH=$JWT_PATH $TESTAPP_FILES_DIR/entrypoint-docker.sh
-# CMD ["sh", "-c", "JWT_SECRET_PATH=$JWT_PATH $TESTAPP_FILES_DIR/entrypoint.sh", "Y"]
